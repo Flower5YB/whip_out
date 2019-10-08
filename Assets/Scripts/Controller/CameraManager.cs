@@ -13,6 +13,7 @@ namespace SA
         public float controllerSpeed = 7; 
 
         public Transform target; //캐릭터 클래스 선언
+        public Transform lockonTarget;
 
         [HideInInspector] //인스펙터 감추기
         public Transform pivot; //메인 카메라 관리 선언
@@ -79,16 +80,28 @@ namespace SA
                 smoothY = v;
             }
 
-            if(lockon)
-            {
+            tiltAngle -= smoothY * targetSpeed; //카메라 Y축 앵글 회전을 위한 값 + 캐릭터 움직임 보정
+            tiltAngle = Mathf.Clamp(tiltAngle, minAngle, maxAngle);  // Y축 앵글 회전을 최소각도랑 최대각도까지만 움직이게 한다
+            pivot.localRotation = Quaternion.Euler(tiltAngle, 0, 0);
+            
 
+
+            if (lockon && lockonTarget != null)
+            {
+                Vector3 targetDir = lockonTarget.position - transform.position;
+                targetDir.Normalize();
+                //targetDir.y = 0;
+
+                if (targetDir == Vector3.zero)
+                    targetDir = transform.forward;
+                Quaternion targetRot = Quaternion.LookRotation(targetDir);
+                transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, d * 9);
+                lookAngle = transform.eulerAngles.y;//카메라 Y축 외의 이동고정
+                return;
             }
 
             lookAngle += smoothX * targetSpeed; //카메라 X축 앵글 회전을 위한 값 + 캐릭터 움직임 보정
-            transform.rotation = Quaternion.Euler(0,lookAngle, 0);
-            tiltAngle -= smoothY * targetSpeed; //카메라 Y축 앵글 회전을 위한 값 + 캐릭터 움직임 보정
-            tiltAngle = Mathf.Clamp(tiltAngle,minAngle,maxAngle);  // Y축 앵글 회전을 최소각도랑 최대각도까지만 움직이게 한다
-            pivot.localRotation = Quaternion.Euler(tiltAngle,0,0);
+            transform.rotation = Quaternion.Euler(0,lookAngle, 0);           
         }
 
         public static CameraManager singleton;

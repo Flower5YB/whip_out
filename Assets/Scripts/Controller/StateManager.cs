@@ -14,29 +14,40 @@ namespace SA
         public float horizontal; //수평
         public float moveAmount; //캐릭터 움직임
         public Vector3 moveDir; //캐릭터 움직임 방향
-        public bool rt, rb, lt, lb;
+        public bool rt, rb, lt, lb; //키 입력        
+        public bool rollInput; //구르기 입력
 
         [Header("Stats")]
-        public float moveSpeed = 3; //걸을때 속도
-        public float runSpeed = 4.5f; //뛸때 속도
-        public float rotateSpeed = 5; //회전 속도
+        public float moveSpeed = 2; //걸을때 속도
+        public float runSpeed = 3.5f; //뛸때 속도
+        public float rotateSpeed = 5; //회전 속도       
         public float toGround = 0.5f; //중력
+        public float rollSpeed = 1; // 구르는 속도
 
         [Header("Statas")]
         public bool onGround; //땅에 닿는거 체크
         public bool run; //걷는지 달리는지 체크
         public bool lockOn;
         public bool inAction;
+        public bool canMove;
+        public bool isTwoHanded;        
+
+        [Header("Other")]
+        public EnemyTarget lockOnTarget;
 
         [HideInInspector]
         public Animator anim; //애니메이터 스크립트 변수
         [HideInInspector]
         public Rigidbody rigid; // 리지드 바디 변수
+        [HideInInspector]
+        public AnimatorHook a_hook;
 
         [HideInInspector]
         public float delta; //시간 체크 변수
         [HideInInspector]
         public LayerMask ignoreLayers; //레이어변수 
+
+        float _actionDelay; //모션 연결 변수
 
         public void Init()
         {
@@ -45,6 +56,9 @@ namespace SA
             rigid.angularDrag = 999;
             rigid.drag = 4;
             rigid.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ; //충돌시 회전 방지
+
+            a_hook = activeModel.AddComponent<AnimatorHook>();
+            a_hook.Init(this);
 
             gameObject.layer = 8;
             ignoreLayers = ~(1 << 9);
@@ -73,19 +87,36 @@ namespace SA
 
         public void FixedTick(float d) //프레임 보정
         {
-            delta = d;
-            inAction = !anim.GetBool("canMove");
-
-            if (inAction)
-                return;
-
+            delta = d;        
+            
             DetectAction();
 
             if (inAction)
+            {
+                anim.applyRootMotion = true;
+    
+                _actionDelay += delta;
+                if(_actionDelay > 0.3f)
+                {
+                    inAction = false;
+                    _actionDelay = 0;
+                }
+                else
+                {
+                    return;
+                }                
+            }               
+                     
+            canMove = anim.GetBool("canMove");
+
+            if (!canMove)
                 return;
 
-            rigid.drag = (moveAmount > 0 || onGround == false) ? 0 : 4; //움직이거나, 떨어지면 중력이 크게 작용
+            a_hook.rm_multi = 1;
+            HandleRolls();            
 
+            anim.applyRootMotion = false;
+            rigid.drag = (moveAmount > 0 || onGround == false) ? 0 : 4; //움직이거나, 떨어지면 중력이 크게 작용
 
             float targetSpeed = moveSpeed;
             if (run)
@@ -93,26 +124,34 @@ namespace SA
 
             if (onGround)
                 rigid.velocity = moveDir * (targetSpeed * moveAmount); //움직이는 방향으로 속도제어
-            if (run)
-            {
-                lockOn = false;
-            }
-            if (!lockOn)
-            {
-                Vector3 targerDir = moveDir;
-                targerDir.y = 0; //캐릭터 방향이 하늘로 안가게
-                if (targerDir == Vector3.zero)  //0. 0 . 0
-                    targerDir = transform.forward;  //캐릭터의 방향이 유니티 기준 파란색 방향
-                Quaternion tr = Quaternion.LookRotation(targerDir); //캐릭터 바라보게 함
-                Quaternion targetRotation = Quaternion.Slerp(transform.rotation, tr, delta * moveAmount * rotateSpeed);    //캐릭터의 회전 부드럽게
-                transform.rotation = targetRotation;    //직접 접근 못하니 선언
-            }
+            if (run)            
+                lockOn = false;            
+          
+            Vector3 targerDir = (lockOn == false)? moveDir 
+                : lockOnTarget.transform.position - transform.position;
 
-            HandleMovementAnimations();
+            targerDir.y = 0; //캐릭터 방향이 하늘로 안가게
+            if (targerDir == Vector3.zero)  //0. 0 . 0
+                targerDir = transform.forward;  //캐릭터의 방향이 유니티 기준 파란색 방향
+
+            Quaternion tr = Quaternion.LookRotation(targerDir); //캐릭터 바라보게 함
+            Quaternion targetRotation = Quaternion.Slerp(transform.rotation, tr, delta * moveAmount * rotateSpeed);    //캐릭터의 회전 부드럽게
+            transform.rotation = targetRotation;    //직접 접근 못하니 선언    
+
+            anim.SetBool("lockon", lockOn);
+
+            if (lockOn == false)
+                HandleMovementAnimations();
+            else
+                HandleLockOnAnimations(moveDir);
         }
 
         public void DetectAction()
         {
+
+            if (canMove == false)
+                return;
+
             if (rb == false && rt == false && lt == false && lb == false)
                 return;
             string targetAnim = null;
@@ -129,8 +168,10 @@ namespace SA
             if (string.IsNullOrEmpty(targetAnim))
                 return;
 
-            inAction = true;           
-            anim.CrossFade(targetAnim, 0.4f);
+            canMove = false;
+            inAction = true;
+            anim.CrossFade(targetAnim, 0.2f);
+            //rigid.velocity = Vector3.zero;
         }
 
         public void Tick(float d)
@@ -141,10 +182,60 @@ namespace SA
             anim.SetBool("onGround", onGround);
         }
 
+        void HandleRolls() //Lockon 했을때 , 안했을때의 구르기 모션 명령
+        {
+            if (!rollInput)
+                return;
+            float v = vertical;
+            float h = horizontal;
+            v = (moveAmount > 0.3f)? 1 : 0;
+            h = 0;
+
+            //if (lockOn == false)
+            //{
+            //    v = (moveAmount > 0.3f)? 1 : 0;                
+            //    h = 0;
+            //}
+            //else
+            //{
+            //    if (Mathf.Abs(v) > 0.3f) //데이터의 절대값이 0.3을 넘을경우
+            //        v = 0;
+            //    if (Mathf.Abs(h) < 0.3f) //데이터의 절대값이 0.3보다 작을경우
+            //        h = 0;
+            //}
+
+            if (v != 0)
+            {
+                if (moveDir == Vector3.zero)
+                    moveDir = transform.forward;
+                Quaternion targetRot = Quaternion.LookRotation(moveDir);
+                transform.rotation = targetRot;
+            }
+
+            a_hook.rm_multi = rollSpeed;
+
+            anim.SetFloat("vertical", v);
+            anim.SetFloat("horizontal", h);
+
+            canMove = false;
+            inAction = true;
+            anim.CrossFade("Rolls", 0.2f);
+        }
+
         void HandleMovementAnimations()
         {
             anim.SetBool("run",run);
             anim.SetFloat("vertical", moveAmount, 0.4f ,delta); //블렌더 트리 
+        }
+
+        void HandleLockOnAnimations(Vector3 moveDir)
+        {
+            Vector3 relativeDir = transform.InverseTransformDirection(moveDir);
+            float h = relativeDir.x;
+            float v = relativeDir.z;
+
+            anim.SetFloat("vertical", v, 0.2f, delta);
+            anim.SetFloat("horizontal", h, 0.2f, delta);
         }
 
         public bool OnGround()
@@ -166,6 +257,11 @@ namespace SA
                 transform.position = targetPosition;
             }
             return r;
+        }
+
+        public void HandleTwoHanded()
+        {
+            anim.SetBool("two_handed", isTwoHanded);
         }
     }
 }
