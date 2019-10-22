@@ -95,8 +95,9 @@ namespace SA
             ani.SetFloat("vertical", vertical); //수직 속도
             ani.SetFloat("horizontal",horizontal); //수평 속도
         }
-
-        public void OpenDamageColliders() { }
-        public void CloseDamageColliders() { }
+        public void OpenDamageColliders()
+        { }
+        public void CloseDamageColliders()
+        { }
     }
 }

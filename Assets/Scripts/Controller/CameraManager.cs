@@ -6,19 +6,20 @@ namespace SA
 {
     public class CameraManager : MonoBehaviour
     {
-
         public bool lockon; //락온 모드 사용할 변수 선언
         public float followSpeed = 9; //카메라 따라오는 실수 선언
         public float mouseSpeed = 2; //마우스 움직이는 속도 실수 선언     
         public float controllerSpeed = 7; 
 
         public Transform target; //캐릭터 클래스 선언
-        public Transform lockonTarget;
+        public EnemyTarget lockonTarget; // 적 유닛 LockOn 클래스
+        public Transform lockonTransform; //록온 변경 클래스 선언
 
         [HideInInspector] //인스펙터 감추기
         public Transform pivot; //메인 카메라 관리 선언
         [HideInInspector]
         public Transform camTrans; //카메라 위치 관리 선언
+        StateManager states;
 
         float turnSmoothing = 0.1f; //카메라 회전 시간 지연
         public float minAngle = -35; //카메라 최소각도
@@ -31,10 +32,13 @@ namespace SA
         public float lookAngle; //x축 캐릭터 회전각도 
         public float tiltAngle; //Y축 캐릭터 회전각도
 
+        bool usedRightAxis;
+
         //카메라 설정값 초기화
-        public void Init(Transform t)
+        public void Init(StateManager st)
         {
-            target = t;
+            states = st;
+            target = st.transform;
 
             camTrans = Camera.main.transform;
             pivot = camTrans.parent;
@@ -50,7 +54,35 @@ namespace SA
 
             float targetSpeed = mouseSpeed; //캐릭터 움직임 속도, 마우스 움직임 속도
 
-            if(c_h != 0 || c_v != 0)
+            if(lockonTarget != null)
+            {
+
+                if (lockonTransform == null)
+                {
+                    lockonTransform = lockonTarget.GerTarget();
+                    states.lockOnTransform = lockonTransform;
+                }
+
+                if(Mathf.Abs(h) > 0.6f)
+                {
+                    if(!usedRightAxis)
+                    {
+                        lockonTransform = lockonTarget.GerTarget((h > 0));
+                        states.lockOnTransform = lockonTransform;
+                        usedRightAxis = true;
+                    }                    
+                }                
+            }
+
+            if(usedRightAxis)
+            {
+                if(Mathf.Abs(h) < 0.6f)
+                {
+                    usedRightAxis = false;
+                }
+            }
+
+            if (c_h != 0 || c_v != 0)
             {
                 h = c_h;
                 v = c_v;
@@ -82,16 +114,14 @@ namespace SA
 
             tiltAngle -= smoothY * targetSpeed; //카메라 Y축 앵글 회전을 위한 값 + 캐릭터 움직임 보정
             tiltAngle = Mathf.Clamp(tiltAngle, minAngle, maxAngle);  // Y축 앵글 회전을 최소각도랑 최대각도까지만 움직이게 한다
-            pivot.localRotation = Quaternion.Euler(tiltAngle, 0, 0);
-            
-
+            pivot.localRotation = Quaternion.Euler(tiltAngle, 0, 0);          
 
             if (lockon && lockonTarget != null)
             {
-                Vector3 targetDir = lockonTarget.position - transform.position;
+                Vector3 targetDir = lockonTransform.position - transform.position;
                 targetDir.Normalize();
                 //targetDir.y = 0;
-
+                
                 if (targetDir == Vector3.zero)
                     targetDir = transform.forward;
                 Quaternion targetRot = Quaternion.LookRotation(targetDir);
@@ -99,7 +129,7 @@ namespace SA
                 lookAngle = transform.eulerAngles.y;//카메라 Y축 외의 이동고정
                 return;
             }
-
+          
             lookAngle += smoothX * targetSpeed; //카메라 X축 앵글 회전을 위한 값 + 캐릭터 움직임 보정
             transform.rotation = Quaternion.Euler(0,lookAngle, 0);           
         }

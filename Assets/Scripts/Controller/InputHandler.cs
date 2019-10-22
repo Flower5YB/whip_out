@@ -19,6 +19,7 @@ namespace SA
         bool rb_input;
         float rt_axis;
         bool rt_input;
+
         bool lb_input;
         float lt_axis;
         bool lt_input;
@@ -26,8 +27,12 @@ namespace SA
         bool leftAxis_down;
         bool rightAxis_down;
 
+        float b_timer;
+        float rt_timer;
+        float lt_timer;
+
         StateManager states;
-        CameraManager camManger;    //게임매니저의 매니저
+        CameraManager camManager;    //게임매니저의 매니저
         float delta;               
 
         void Start()
@@ -35,32 +40,35 @@ namespace SA
             states = GetComponent<StateManager>();
             states.Init();
 
-            camManger = CameraManager.singleton;
-            camManger.Init(this.transform);
+            camManager = CameraManager.singleton;
+            camManager.Init(states);
         }
         void FixedUpdate()
         {
             delta = Time.fixedDeltaTime;
             GetInput();
             UpdateStates();
-            states.FixedTick(Time.deltaTime);
             states.FixedTick(delta);
-            camManger.Tick(delta);
+            camManager.Tick(delta);            
         }
+
         void Update()
         {
             delta = Time.deltaTime;
             states.Tick(delta);
+            ResetInputNStates();
         }
 
         void GetInput()
         {
             vertical = Input.GetAxis("Vertical");
             horizontal = Input.GetAxis("Horizontal");
+
             b_input = Input.GetButton("B");
             a_input = Input.GetButton("A");
             y_input = Input.GetButtonUp("Y");
             x_input = Input.GetButton("X");
+
             rt_input = Input.GetButton("RT");            
             rt_axis = Input.GetAxis("RT");
             if (rt_axis != 0)
@@ -70,33 +78,37 @@ namespace SA
             lt_axis = Input.GetAxis("LT");
             if (lt_axis != 0)
                 lt_input = true;
+
             rb_input = Input.GetButton("RB");
             lb_input = Input.GetButton("LB");
 
-            rightAxis_down = Input.GetButtonUp("L");            
+            rightAxis_down = Input.GetButtonUp("L");
+
+            if (b_input)
+                b_timer += delta;            
         }
+
         void UpdateStates()
         {
             states.horizontal = horizontal;
             states.vertical = vertical;
 
-            Vector3 v = states.vertical * camManger.transform.forward; //카메라 수직 이동(유니티 파란색 화살표)
-            Vector3 h = horizontal * camManger.transform.right; //카메라 수평이동(유니티 빨간색 화살표)
+            Vector3 v = states.vertical * camManager.transform.forward; //카메라 수직 이동(유니티 파란색 화살표)
+            Vector3 h = horizontal * camManager.transform.right; //카메라 수평이동(유니티 빨간색 화살표)
             states.moveDir = (v + h).normalized; //카메라 이동 정규화(방향만 가져온다)
             float m = Mathf.Abs(horizontal) + Mathf.Abs(vertical); //수평 , 수직이동 절대값(음수방지)
             states.moveAmount = Mathf.Clamp01(m);   //m값을 0~1 까지 제한
+                       
 
-            states.rollInput = b_input;
+            if(b_input && b_timer > 0.5f)
+            {
+                states.run = (states.moveAmount > 0);                            
+            }
 
-            if(b_input)
-            {
-                //states.run = (states.moveAmount > 0);                            
-            }
-            else
-            {
-                //states.run = false;
-            }
-            
+            if (b_input == false && b_timer > 0 && b_timer < 0.5f)
+                states.rollInput = true;
+
+
             states.rt = rt_input;
             states.lt = lt_input;
             states.rb = rb_input;
@@ -115,9 +127,20 @@ namespace SA
                 if(states.lockOnTarget == null)                
                     states.lockOn = false;
 
-                camManger.lockonTarget = states.lockOnTarget.transform;
-                camManger.lockon = states.lockOn;
+                camManager.lockonTarget = states.lockOnTarget;
+                states.lockOnTransform = camManager.lockonTransform;
+                camManager.lockon = states.lockOn;
             }
+        }
+
+        void ResetInputNStates()
+        {
+            if (b_input == false)
+                b_timer = 0;
+            if (states.rollInput)
+                states.rollInput = false;
+            if (states.run)
+                states.run = false;
         }
     }
 }

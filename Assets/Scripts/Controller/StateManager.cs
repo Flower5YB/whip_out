@@ -25,20 +25,22 @@ namespace SA
         public float rollSpeed = 1; // 구르는 속도
 
         [Header("Statas")]
-        public bool onGround; //땅에 닿는거 체크
-        public bool run; //걷는지 달리는지 체크
-        public bool lockOn;
-        public bool inAction;
+        public bool onGround; //땅에 닿는거
+        public bool run; //걷는지 달리는지
+        public bool lockOn; //록온
+        public bool inAction;   //움직임 
         public bool canMove;
-        public bool isTwoHanded;        
+        public bool isTwoHanded;    //쌍수   
 
         [Header("Other")]
         public EnemyTarget lockOnTarget;
+        public Transform lockOnTransform;
+        public AnimationCurve roll_curve;   //애니메이션(구르기) 루트모션 제어
 
         [HideInInspector]
         public Animator anim; //애니메이터 스크립트 변수
         [HideInInspector]
-        public Rigidbody rigid; // 리지드 바디 변수
+        public Rigidbody rigid; // 리지드 바디 변수        
         [HideInInspector]
         public AnimatorHook a_hook;
 
@@ -55,7 +57,7 @@ namespace SA
             rigid = GetComponent<Rigidbody>(); // 조종 하는 플레이어의 리지드 바디 
             rigid.angularDrag = 999;
             rigid.drag = 4;
-            rigid.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ; //충돌시 회전 방지
+            rigid.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ; //충돌시 회전 방지            
 
             a_hook = activeModel.AddComponent<AnimatorHook>();
             a_hook.Init(this);
@@ -112,8 +114,9 @@ namespace SA
             if (!canMove)
                 return;
 
-            a_hook.rm_multi = 1;
-            HandleRolls();            
+            //a_hook.rm_multi = 1;
+            a_hook.CloseRoll();
+            HandleRolls();
 
             anim.applyRootMotion = false;
             rigid.drag = (moveAmount > 0 || onGround == false) ? 0 : 4; //움직이거나, 떨어지면 중력이 크게 작용
@@ -127,13 +130,17 @@ namespace SA
             if (run)            
                 lockOn = false;            
           
-            Vector3 targerDir = (lockOn == false)? moveDir 
-                : lockOnTarget.transform.position - transform.position;
+            Vector3 targerDir = (lockOn == false) ? 
+                moveDir 
+                :
+                (lockOnTransform != null)?
+                    lockOnTransform.transform.position - transform.position
+                    :
+                    moveDir;
 
             targerDir.y = 0; //캐릭터 방향이 하늘로 안가게
             if (targerDir == Vector3.zero)  //0. 0 . 0
                 targerDir = transform.forward;  //캐릭터의 방향이 유니티 기준 파란색 방향
-
             Quaternion tr = Quaternion.LookRotation(targerDir); //캐릭터 바라보게 함
             Quaternion targetRotation = Quaternion.Slerp(transform.rotation, tr, delta * moveAmount * rotateSpeed);    //캐릭터의 회전 부드럽게
             transform.rotation = targetRotation;    //직접 접근 못하니 선언    
@@ -154,6 +161,7 @@ namespace SA
 
             if (rb == false && rt == false && lt == false && lb == false)
                 return;
+
             string targetAnim = null;
 
             if (rb)
@@ -170,8 +178,7 @@ namespace SA
 
             canMove = false;
             inAction = true;
-            anim.CrossFade(targetAnim, 0.2f);
-            //rigid.velocity = Vector3.zero;
+            anim.CrossFade(targetAnim, 0.2f);                     
         }
 
         public void Tick(float d)
@@ -210,9 +217,14 @@ namespace SA
                     moveDir = transform.forward;
                 Quaternion targetRot = Quaternion.LookRotation(moveDir);
                 transform.rotation = targetRot;
+                a_hook.InitForRoll();
+                a_hook.rm_multi = rollSpeed;
             }
 
-            a_hook.rm_multi = rollSpeed;
+            else
+            {
+                a_hook.rm_multi = 1.3f;
+            }
 
             anim.SetFloat("vertical", v);
             anim.SetFloat("horizontal", h);
@@ -220,6 +232,7 @@ namespace SA
             canMove = false;
             inAction = true;
             anim.CrossFade("Rolls", 0.2f);
+            
         }
 
         void HandleMovementAnimations()
