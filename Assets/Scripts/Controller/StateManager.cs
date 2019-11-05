@@ -16,13 +16,14 @@ namespace SA
         public Vector3 moveDir; //캐릭터 움직임 방향
         public bool rt, rb, lt, lb; //키 입력        
         public bool rollInput; //구르기 입력
+        public bool itemInput; //아이템 입력
 
         [Header("Stats")]
         public float moveSpeed = 2; //걸을때 속도
         public float runSpeed = 3.5f; //뛸때 속도
         public float rotateSpeed = 5; //회전 속도       
         public float toGround = 0.5f; //중력
-        public float rollSpeed = 1; // 구르는 속도
+        public float rollSpeed = 1; // 구르는 속도        
 
         [Header("Statas")]
         public bool onGround; //땅에 닿는거
@@ -31,6 +32,7 @@ namespace SA
         public bool inAction;   //움직임 
         public bool canMove;
         public bool isTwoHanded;    //쌍수   
+        public bool usingItem;  //아이템 이벤트 속도
 
         [Header("Other")]
         public EnemyTarget lockOnTarget;
@@ -43,6 +45,10 @@ namespace SA
         public Rigidbody rigid; // 리지드 바디 변수        
         [HideInInspector]
         public AnimatorHook a_hook;
+        [HideInInspector]
+        public ActionManager actionManager;
+        [HideInInspector]
+        public InventoryManager inventoryManager;
 
         [HideInInspector]
         public float delta; //시간 체크 변수
@@ -59,8 +65,16 @@ namespace SA
             rigid.drag = 4;
             rigid.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ; //충돌시 회전 방지            
 
-            a_hook = activeModel.AddComponent<AnimatorHook>();
-            a_hook.Init(this);
+            inventoryManager = GetComponent<InventoryManager>();
+            inventoryManager.Init();
+
+            actionManager = GetComponent<ActionManager>();
+            actionManager.Init(this);
+
+            a_hook = activeModel.GetComponent<AnimatorHook>();
+            if (a_hook == null)
+                a_hook = activeModel.AddComponent<AnimatorHook>();           
+            a_hook.Init(this,null);
 
             gameObject.layer = 8;
             ignoreLayers = ~(1 << 9);
@@ -89,9 +103,12 @@ namespace SA
 
         public void FixedTick(float d) //프레임 보정
         {
-            delta = d;        
-            
+            delta = d;
+
+            usingItem = anim.GetBool("interacting");         
+            DetectItemAction();
             DetectAction();
+            inventoryManager.curWeapon.weaponModel.SetActive(!usingItem);
 
             if (inAction)
             {
@@ -122,11 +139,17 @@ namespace SA
             rigid.drag = (moveAmount > 0 || onGround == false) ? 0 : 4; //움직이거나, 떨어지면 중력이 크게 작용
 
             float targetSpeed = moveSpeed;
+            if(usingItem)
+            {
+                run = false;
+                moveAmount = Mathf.Clamp(moveAmount, 0, 0.45f);
+            }
             if (run)
                 targetSpeed = runSpeed;
 
             if (onGround)
                 rigid.velocity = moveDir * (targetSpeed * moveAmount); //움직이는 방향으로 속도제어
+
             if (run)            
                 lockOn = false;            
           
@@ -153,10 +176,27 @@ namespace SA
                 HandleLockOnAnimations(moveDir);
         }
 
+        public void DetectItemAction()
+        {
+            if (canMove == false || usingItem)
+                return;
+            if (itemInput == false)
+                return;
+
+            ItemAction slot = actionManager.consumableItem;
+            string targetAnim = slot.targetAnim;
+            if (string.IsNullOrEmpty(targetAnim))
+                return;
+
+            //inventoryManager.curWeapon.weaponModel.SetActive(false);
+            usingItem = true;
+            anim.Play(targetAnim);
+        }
+
         public void DetectAction()
         {
 
-            if (canMove == false)
+            if (canMove == false || usingItem)
                 return;
 
             if (rb == false && rt == false && lt == false && lb == false)
@@ -164,21 +204,17 @@ namespace SA
 
             string targetAnim = null;
 
-            if (rb)
-                targetAnim = "oh_attack_1";
-            if (rt)
-                targetAnim = "oh_attack_2";
-            if (lt)
-                targetAnim = "oh_attack_3";
-            if (lb)
-                targetAnim = "th_attack_1";
+            Action slot = actionManager.GetActionSlot(this);
+            if (slot == null)
+                return;
+            targetAnim = slot.targetAnim;
 
             if (string.IsNullOrEmpty(targetAnim))
                 return;
 
             canMove = false;
             inAction = true;
-            anim.CrossFade(targetAnim, 0.2f);                     
+            anim.CrossFade(targetAnim, 0.2f);                  
         }
 
         public void Tick(float d)
@@ -191,7 +227,7 @@ namespace SA
 
         void HandleRolls() //Lockon 했을때 , 안했을때의 구르기 모션 명령
         {
-            if (!rollInput)
+            if (!rollInput || usingItem)
                 return;
             float v = vertical;
             float h = horizontal;
@@ -231,8 +267,7 @@ namespace SA
 
             canMove = false;
             inAction = true;
-            anim.CrossFade("Rolls", 0.2f);
-            
+            anim.CrossFade("Rolls", 0.2f);            
         }
 
         void HandleMovementAnimations()
@@ -275,6 +310,10 @@ namespace SA
         public void HandleTwoHanded()
         {
             anim.SetBool("two_handed", isTwoHanded);
+            if (isTwoHanded)
+                actionManager.UpdateAcionsTwoHanded();
+            else
+                actionManager.UpdateAcionsOneHanded();
         }
     }
 }

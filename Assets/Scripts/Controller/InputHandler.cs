@@ -97,8 +97,10 @@ namespace SA
             Vector3 h = horizontal * camManager.transform.right; //카메라 수평이동(유니티 빨간색 화살표)
             states.moveDir = (v + h).normalized; //카메라 이동 정규화(방향만 가져온다)
             float m = Mathf.Abs(horizontal) + Mathf.Abs(vertical); //수평 , 수직이동 절대값(음수방지)
-            states.moveAmount = Mathf.Clamp01(m);   //m값을 0~1 까지 제한
-                       
+            states.moveAmount = Mathf.Clamp01(m);   //m값을 0~1 까지 제한                       
+
+            if (x_input)
+                b_input = false;
 
             if(b_input && b_timer > 0.5f)
             {
@@ -108,24 +110,36 @@ namespace SA
             if (b_input == false && b_timer > 0 && b_timer < 0.5f)
                 states.rollInput = true;
 
-
+            states.itemInput = x_input;
             states.rt = rt_input;
             states.lt = lt_input;
             states.rb = rb_input;
             states.lb = lb_input;
 
-            if(y_input)
+            if(y_input) //Y 버튼 눌렀을시 쌍수로 모션 변화 이벤트
             {
                 states.isTwoHanded = !states.isTwoHanded;
                 states.HandleTwoHanded();
             }
 
-            if(rightAxis_down)
+            if (states.lockOnTarget != null)    //록온 타겟 모델 사망시
+            {
+                if (states.lockOnTarget.eStates.isDead) //록온된 모델 사망시 카메라 초기화
+                {
+                    states.lockOn = false;
+                    states.lockOnTarget = null;
+                    states.lockOnTransform = null;
+                    camManager.lockon = false;
+                    camManager.lockonTarget = null;
+                }
+            }
+
+            if (rightAxis_down) //대상 Lock on
             {                
                 states.lockOn = !states.lockOn;
 
                 if(states.lockOnTarget == null)                
-                    states.lockOn = false;
+                    states.lockOn = false;                
 
                 camManager.lockonTarget = states.lockOnTarget;
                 states.lockOnTransform = camManager.lockonTransform;
