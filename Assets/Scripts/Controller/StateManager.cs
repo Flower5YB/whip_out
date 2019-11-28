@@ -2,12 +2,16 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace SA
+namespace YB
 {
     public class StateManager : MonoBehaviour
     {
         [Header("Init")]
         public GameObject activeModel;
+
+        [Header("Stats")]
+        public Attributes attributes;
+        public CharacterStats characterStats;
 
         [Header("Inputs")]
         public float vertical; //수직
@@ -24,6 +28,8 @@ namespace SA
         public float rotateSpeed = 5; //회전 속도       
         public float toGround = 0.5f; //중력
         public float rollSpeed = 1; // 구르는 속도        
+        public float parryOffset = 1.4f;    //카운터 어택 모션 속도
+        public float backStabOffset = 1.4f;  //뒤치기 모션 속도
 
         [Header("Statas")]
         public bool onGround; //땅에 닿는거
@@ -33,11 +39,17 @@ namespace SA
         public bool canMove;
         public bool isTwoHanded;    //쌍수   
         public bool usingItem;  //아이템 이벤트 속도
+        public bool canBeParried;    //카운터 했을때
+        public bool parryIsOn;  //패리 성공했을때
+        public bool isBlocking; //막았을때
+        public bool isLeftHand; //왼손일때        
 
         [Header("Other")]
         public EnemyTarget lockOnTarget;
         public Transform lockOnTransform;
         public AnimationCurve roll_curve;   //애니메이션(구르기) 루트모션 제어
+        //public EnemyStates parryTarget; //카운터할 객체
+
 
         [HideInInspector]
         public Animator anim; //애니메이터 스크립트 변수
@@ -55,6 +67,9 @@ namespace SA
         [HideInInspector]
         public LayerMask ignoreLayers; //레이어변수 
 
+        [HideInInspector]
+        public Action currentAction;
+
         float _actionDelay; //모션 연결 변수
 
         public void Init()
@@ -66,7 +81,7 @@ namespace SA
             rigid.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ; //충돌시 회전 방지            
 
             inventoryManager = GetComponent<InventoryManager>();
-            inventoryManager.Init();
+            inventoryManager.Init(this);
 
             actionManager = GetComponent<ActionManager>();
             actionManager.Init(this);
@@ -79,7 +94,7 @@ namespace SA
             gameObject.layer = 8;
             ignoreLayers = ~(1 << 9);
 
-            anim.SetBool("onGround", true);
+            anim.SetBool(StaticStrings.onGround, true);
         }
         
         void SetupAnimator()
@@ -103,12 +118,16 @@ namespace SA
 
         public void FixedTick(float d) //프레임 보정
         {
-            delta = d;
+            delta = d;            
 
-            usingItem = anim.GetBool("interacting");         
-            DetectItemAction();
+            isBlocking = false;
+            usingItem = anim.GetBool(StaticStrings.interacting);
             DetectAction();
-            inventoryManager.curWeapon.weaponModel.SetActive(!usingItem);
+            DetectItemAction();
+            inventoryManager.rightHandWeapon.instance.weaponModel.SetActive(!usingItem);
+
+            anim.SetBool(StaticStrings.blocking, isBlocking);
+            anim.SetBool(StaticStrings.isLeft, isLeftHand);
 
             if (inAction)
             {
@@ -126,7 +145,7 @@ namespace SA
                 }                
             }               
                      
-            canMove = anim.GetBool("canMove");
+            canMove = anim.GetBool(StaticStrings.canMove);
 
             if (!canMove)
                 return;
@@ -168,7 +187,7 @@ namespace SA
             Quaternion targetRotation = Quaternion.Slerp(transform.rotation, tr, delta * moveAmount * rotateSpeed);    //캐릭터의 회전 부드럽게
             transform.rotation = targetRotation;    //직접 접근 못하니 선언    
 
-            anim.SetBool("lockon", lockOn);
+            anim.SetBool(StaticStrings.lockon, lockOn);
 
             if (lockOn == false)
                 HandleMovementAnimations();
@@ -178,8 +197,9 @@ namespace SA
 
         public void DetectItemAction()
         {
-            if (canMove == false || usingItem)
+            if (canMove == false || usingItem || isBlocking)
                 return;
+
             if (itemInput == false)
                 return;
 
@@ -200,21 +220,186 @@ namespace SA
                 return;
 
             if (rb == false && rt == false && lt == false && lb == false)
-                return;
-
-            string targetAnim = null;
+                return;            
 
             Action slot = actionManager.GetActionSlot(this);
             if (slot == null)
                 return;
+
+            switch (slot.type)
+            {
+                case ActionType.attack:
+                    AttackAction(slot);
+                    break;
+                case ActionType.block:
+                    BlockAction(slot);
+                    break;
+                case ActionType.spells:
+                    break;
+                case ActionType.parry:
+                    ParryAction(slot);
+                    break;
+                default:
+                    break;
+            }            
+        }
+
+
+        void AttackAction(Action slot)
+        {
+            if (CheckForParry(slot))            
+                return;
+
+            if (CheckForBackstab(slot))
+                return;            
+
+            string targetAnim = null;
+            targetAnim = slot.targetAnim;
+
+            if (string.IsNullOrEmpty(targetAnim))
+                return;
+            
+            canMove = false;
+            inAction = true;
+
+            float targetSpeed = 1;
+            if (slot.changeSpeed)
+            {
+                targetSpeed = slot.animSpeed;
+                if (targetSpeed == 0)
+                    targetSpeed = 1;
+            }
+
+            canBeParried = slot.canBeParried;
+            anim.SetFloat(StaticStrings.animSpeed, targetSpeed);
+            anim.SetBool(StaticStrings.mirror, slot.mirror);
+            anim.CrossFade(targetAnim, 0.2f);
+        }
+
+        bool CheckForParry(Action slot)    //카운터 체크 , 카운터 성공시 적과 모델 고정
+        {
+            if (slot.canParry == false)
+                return false;
+            EnemyStates parryTarget = null;
+            Vector3 origin = transform.position;
+            origin.y += 1;
+            Vector3 raydir = transform.forward;
+            RaycastHit hit;
+            if(Physics.Raycast(origin,raydir, out hit,3,ignoreLayers))
+            {
+                parryTarget = hit.transform.GetComponentInParent<EnemyStates>();
+            }
+
+            if (parryTarget == null)
+                return false;
+            if (parryTarget.parriedBy == null)
+                return false;
+
+            //float dis = Vector3.Distance(parryTarget.transform.position, transform.position);
+
+            //if (dis > 3)
+            //    return false;
+
+            Vector3 dir = parryTarget.transform.position - transform.position;
+            dir.Normalize();
+            dir.y = 0;
+            float angle = Vector3.Angle(transform.forward, dir);
+
+            if (angle < 60)
+            {
+                Vector3 targetPosition = -dir * parryOffset;
+                targetPosition += parryTarget.transform.position;
+                transform.position = targetPosition;
+
+                if (dir == Vector3.zero)    //카운터 방향의 버그 방지
+                    dir = -parryTarget.transform.forward;
+
+                Quaternion eRotation = Quaternion.LookRotation(-dir);
+                Quaternion ourRot = Quaternion.LookRotation(dir);
+
+                parryTarget.transform.rotation = eRotation;
+                transform.rotation = ourRot;
+
+                parryTarget.IsGettingParried(slot);
+
+                canMove = false;
+                inAction = true;
+                anim.SetBool(StaticStrings.mirror, slot.mirror);
+                anim.CrossFade(StaticStrings.parry_attack, 0.2f);
+                lockOnTarget = null;
+                return true;
+            }
+            return false;
+        }
+
+        bool CheckForBackstab(Action slot)//뒤치기 체크 , 뒤치기 성공시 적과 모델 고정
+        {
+            if (slot.canBackStab == false)
+                return false;
+
+            EnemyStates backstab = null;
+            Vector3 origin = transform.position;
+            origin.y += 1;
+            Vector3 raydir = transform.forward;
+            RaycastHit hit;
+            if (Physics.Raycast(origin, raydir, out hit, 1, ignoreLayers))
+            {
+                backstab = hit.transform.GetComponentInParent<EnemyStates>();
+            }
+
+            if (backstab == null)
+                return false;
+
+            Vector3 dir = transform.position - backstab.transform.position;
+            dir.Normalize();
+            dir.y = 0;
+            float angle = Vector3.Angle(backstab.transform.forward, dir);
+
+            if (angle > 150)
+            {
+                Vector3 targetPosition = dir * backStabOffset;    //카운터 어택 모델링 애니메이션과 움직임이 같음
+                targetPosition += backstab.transform.position;
+                transform.position = targetPosition;
+              
+                backstab.transform.rotation = transform.rotation;   //뒤치기 후 객체 움직임 고정
+                backstab.IsGettingBackstabbed(slot);
+                canMove = false;
+                inAction = true;
+                anim.SetBool(StaticStrings.mirror, slot.mirror);
+                anim.CrossFade(StaticStrings.parry_attack, 0.2f);
+                lockOnTarget = null;
+                return true;
+            }
+            return false;
+        }
+
+        void BlockAction(Action slot)
+        {
+            isBlocking = true;
+            isLeftHand = slot.mirror;
+        }
+
+        void ParryAction(Action slot)
+        {
+            string targetAnim = null;
             targetAnim = slot.targetAnim;
 
             if (string.IsNullOrEmpty(targetAnim))
                 return;
 
+            float targetSpeed = 1;
+            if (slot.changeSpeed)
+            {
+                targetSpeed = slot.animSpeed;
+                if (targetSpeed == 0)
+                    targetSpeed = 1;
+            }
+            anim.SetFloat(StaticStrings.animSpeed, targetSpeed);
+            canBeParried = slot.canBeParried;
             canMove = false;
             inAction = true;
-            anim.CrossFade(targetAnim, 0.2f);                  
+            anim.SetBool(StaticStrings.mirror, slot.mirror);
+            anim.CrossFade(targetAnim, 0.2f);
         }
 
         public void Tick(float d)
@@ -222,7 +407,7 @@ namespace SA
             delta = d;
             onGround = OnGround();
 
-            anim.SetBool("onGround", onGround);
+            anim.SetBool(StaticStrings.onGround, onGround);
         }
 
         void HandleRolls() //Lockon 했을때 , 안했을때의 구르기 모션 명령
@@ -262,18 +447,18 @@ namespace SA
                 a_hook.rm_multi = 1.3f;
             }
 
-            anim.SetFloat("vertical", v);
-            anim.SetFloat("horizontal", h);
+            anim.SetFloat(StaticStrings.vertical, v);
+            anim.SetFloat(StaticStrings.horizontal, h);
 
             canMove = false;
             inAction = true;
-            anim.CrossFade("Rolls", 0.2f);            
+            anim.CrossFade(StaticStrings.Rolls, 0.2f);            
         }
 
         void HandleMovementAnimations()
         {
-            anim.SetBool("run",run);
-            anim.SetFloat("vertical", moveAmount, 0.4f ,delta); //블렌더 트리 
+            anim.SetBool(StaticStrings.run, run);
+            anim.SetFloat(StaticStrings.vertical, moveAmount, 0.4f ,delta); //블렌더 트리 
         }
 
         void HandleLockOnAnimations(Vector3 moveDir)
@@ -282,8 +467,8 @@ namespace SA
             float h = relativeDir.x;
             float v = relativeDir.z;
 
-            anim.SetFloat("vertical", v, 0.2f, delta);
-            anim.SetFloat("horizontal", h, 0.2f, delta);
+            anim.SetFloat(StaticStrings.vertical, v, 0.2f, delta);
+            anim.SetFloat(StaticStrings.horizontal, h, 0.2f, delta);
         }
 
         public bool OnGround()
@@ -309,11 +494,59 @@ namespace SA
 
         public void HandleTwoHanded()
         {
-            anim.SetBool("two_handed", isTwoHanded);
+            bool isRight = true;
+            Weapon w = inventoryManager.rightHandWeapon.instance;
+            if (w == null)
+            {
+                w = inventoryManager.leftHandWeapon.instance;
+                isRight = false;
+            }
+            if (w == null)
+            {
+                return;
+            }
             if (isTwoHanded)
+            {
+                anim.CrossFade(w.th_idle,0.2f);
                 actionManager.UpdateAcionsTwoHanded();
+
+                if (isRight)
+                {
+                    if (inventoryManager.leftHandWeapon)
+                        inventoryManager.leftHandWeapon.instance.weaponModel.SetActive(false);
+                }
+                else
+                {
+                    if (inventoryManager.rightHandWeapon)
+                        inventoryManager.rightHandWeapon.instance.weaponModel.SetActive(false);
+                }
+            }
             else
+            {
+                string targetAnim = w.oh_idle;
+                targetAnim += (isRight) ? StaticStrings._r : StaticStrings._l;
+                //anim.CrossFade(w.oh_idle, 0.2f);
+                anim.Play(StaticStrings.equipWeapon_oh);                
                 actionManager.UpdateAcionsOneHanded();
+
+                if (isRight)
+                {
+                    if (inventoryManager.leftHandWeapon)
+                        inventoryManager.leftHandWeapon.instance.weaponModel.SetActive(true);
+                }
+
+                else
+                {
+                    if (inventoryManager.rightHandWeapon)
+                        inventoryManager.rightHandWeapon.instance.weaponModel.SetActive(true);
+                }
+            }
         }
+
+        public void IsGettingParried()
+        {
+
+        }
+        
     }
 }

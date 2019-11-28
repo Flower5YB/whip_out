@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace SA
+namespace YB
 {
     public class CameraManager : MonoBehaviour
     {
@@ -21,7 +21,7 @@ namespace SA
         public Transform camTrans; //카메라 위치 관리 선언
         StateManager states;
 
-        float turnSmoothing = 0.1f; //카메라 회전 시간 지연
+        float turnSmoothing = 0.05f; //카메라 회전 시간 지연
         public float minAngle = -35; //카메라 최소각도
         public float maxAngle = 35; // 카메라 최고각도
         
@@ -33,6 +33,9 @@ namespace SA
         public float tiltAngle; //Y축 캐릭터 회전각도
 
         bool usedRightAxis;
+
+        bool changeTargetLeft;  //LockOn 객체 변환
+        bool changeTargetRight; //LockOn 객체 변환
 
         //카메라 설정값 초기화
         public void Init(StateManager st)
@@ -54,7 +57,10 @@ namespace SA
 
             float targetSpeed = mouseSpeed; //캐릭터 움직임 속도, 마우스 움직임 속도
 
-            if(lockonTarget != null)
+            changeTargetLeft = Input.GetKeyUp(KeyCode.V);
+            changeTargetLeft = Input.GetKeyUp(KeyCode.B);
+
+            if (lockonTarget != null)
             {
 
                 if (lockonTransform == null)
@@ -71,7 +77,13 @@ namespace SA
                         states.lockOnTransform = lockonTransform;
                         usedRightAxis = true;
                     }                    
-                }                
+                }
+
+                if (changeTargetLeft || changeTargetRight)
+                {
+                    lockonTransform = lockonTarget.GerTarget(changeTargetLeft);
+                    states.lockOnTransform = lockonTransform;                    
+                }
             }
 
             if(usedRightAxis)

@@ -3,7 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace SA
+namespace YB
 {
     public class EnemyTarget : MonoBehaviour
     {
@@ -26,6 +26,8 @@ namespace SA
             {
                 targets.Add(anim.GetBoneTransform(h_bones[i]));
             }
+
+            EnemyManager.singleton.enemyTargets.Add(this);
         }
 
         public Transform GerTarget(bool negative = false)
